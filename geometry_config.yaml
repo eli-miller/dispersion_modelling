@@ -1,4 +1,4 @@
-Q_source_total: 620 # 62  # g/m^2/year 10x to get ground level conc. to match
+Q_source_total: 8760 # from Clayton paper, max possible. # 620 is 10x katey anecdodal # 62 is from katey in meeting  # g/m^2/year 10x to get ground level conc. to match
 source_area: 600  # m^2
 
 n_source_x: 1 #10

@@ -69,6 +69,7 @@ def dispersion_coeffs(stability):
 def general_concentration(beam_loc, source_loc, Q, u_mag, u_dir, stability="E"):
     '''Q [kg/s] emission rate and returns a concentration [ppm] at that point'''
     ''' With reflection. Page '''
+
     a, b, c, d, e, f = dispersion_coeffs(stability)
     x0, y0, z0, = source_loc
 
@@ -391,6 +392,10 @@ def read_measurement_geometry(file_path):
     with open(file_path, 'r') as f:
         config = yaml.safe_load(f)
 
+
+    return config
+
+def create_measurement_geometry(config):
     Q_source_total = config['Q_source_total']
     source_area = config['source_area']
 
@@ -442,13 +447,20 @@ def plot_simulation_domain(sources, retros, origin, draw_beams=False, plot_3d=Tr
     if plot_3d:
         ax = fig.add_subplot(111, projection='3d')
         ax.set_zlabel('Z')
+
+        ax.scatter(sources.x, sources.y, sources.z, color='C0', label='Sources')
+        ax.scatter(retros.x, retros.y, retros.z, color='C1', label='Retros')
+        ax.scatter(origin[0], origin[1], origin[2], color='C2', label='Tower')
+
     else:
         ax = fig.add_subplot(111)
         ax.axis('equal')
 
-    ax.scatter(sources.x, sources.y, sources.z, color='C0', label='Sources')
-    ax.scatter(retros.x, retros.y, retros.z, color='C1', label='Retros')
-    ax.scatter(origin[0], origin[1], origin[2], color='C2', label='Tower')
+        ax.scatter(sources.x, sources.y,color='C0', label='Sources')
+        ax.scatter(retros.x, retros.y, color='C1', label='Retros')
+        ax.scatter(origin[0], origin[1], color='C2', label='Tower')
+
+
 
     if draw_beams:  # Plot lines between the origin and each retro
         for i in range(len(retros)):
@@ -458,7 +470,6 @@ def plot_simulation_domain(sources, retros, origin, draw_beams=False, plot_3d=Tr
     ax.set_xlabel('X')
     ax.set_ylabel('Y')
     ax.legend()
-    # Make axes equal, repliating plt.axes('equal') for 3d projection: BUG: Not sure if this is working
     plt.show()
 
 
@@ -481,3 +492,16 @@ def plot_retro_z_profiles(retros):
     plt.figure()
     for i, (x, y) in enumerate(retros.groupby(['x', 'y'])):
         sns.lineplot(x='z', y='measurement', data=y, label='%.0f, %.0f' % x)
+
+
+def create_beam_info(sim_info):
+    beam_info = pd.DataFrame(sim_info['beam_info_list'])
+    beam_info['max_at_end'] = beam_info.end_of_beam_concentration == beam_info.max_local_concentration
+    beam_info['retro_max_ratio'] = beam_info.max_local_concentration / beam_info.end_of_beam_concentration
+
+    return beam_info
+def fiter_beam_info(beam_info):
+    beam_info = beam_info[beam_info.end_of_beam_concentration > 1e-4]
+    beam_info = beam_info[beam_info.max_local_concentration > 1e-4]
+
+    return beam_info
