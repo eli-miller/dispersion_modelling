@@ -5,15 +5,20 @@ Created on Mon Jun 13 10:28:22 2022
 
 @author: elimiller
 """
+import cmcrameri.cm as cm
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 import numpy as np
 import pandas as pd
 import seaborn as sns
 import tqdm
 import yaml
+from matplotlib import colors
 from scipy.optimize import minimize, Bounds
 
-
+############################################################################################################
+# Functions for simulating a single retroreflector
+############################################################################################################
 def line_points(start, end, num_pts=5000):
     '''start and end 3x1 array-like of xyz coords.'''
     x1, y1, z1 = start
@@ -33,15 +38,15 @@ def l_to_PG(l):
     l: obukhov length in m
 
     '''
-    if 0 < l < 200:
+    if 0 < l < 200: # Very Stable:
         return 'F'
-    elif 200 < l < 1000:
+    elif 200 < l < 1000: # Stable
         return 'F'
-    elif np.abs(l) > 1000:
+    elif np.abs(l) > 1000: # Near Neutral
         return 'D'
-    elif -1000 < l < -200:
+    elif -1000 < l < -200: # Unstable
         return 'B'
-    elif -200 < l < 0:
+    elif -200 < l < 0: # Very Unstable
         return 'A'
 
 
@@ -69,6 +74,7 @@ def dispersion_coeffs(stability):
 def general_concentration(beam_loc, source_loc, Q, u_mag, u_dir, stability="E"):
     '''Q [kg/s] emission rate and returns a concentration [ppm] at that point'''
     ''' With reflection. Page '''
+
     a, b, c, d, e, f = dispersion_coeffs(stability)
     x0, y0, z0, = source_loc
 
@@ -235,7 +241,9 @@ def get_synthetic_measurement(retros, sources, origin, u_mag, u_dir, stability="
 
     return pic, sim_info  # len = n_retros
 
-
+############################################################################################################
+# Functions for VRPM Fitting
+############################################################################################################
 def polar_gaussian2d_simplified(A, mu_y, sigma_y, sigma_z, r, theta):
     ''' equation 3 from https://pubs.acs.org/doi/pdf/10.1021/es0017108
         with assumptions ground-based emmissions, and no covariance between z&y
@@ -378,7 +386,9 @@ def visualize_bivariate(inputs, ax=None):
     else:
         plt.contour(y_flux, z_flux, fit_conc)
 
-
+############################################################################################################
+# Function for Simulating DCS Measurements
+############################################################################################################
 def read_measurement_geometry(file_path):
     '''Reads in config file that defines source, retro, and tower locations. Returns dataframes of sources and retros
     in the appropriate coordinate scheme
@@ -391,6 +401,10 @@ def read_measurement_geometry(file_path):
     with open(file_path, 'r') as f:
         config = yaml.safe_load(f)
 
+    return config
+
+
+def create_measurement_geometry(config):
     Q_source_total = config['Q_source_total']
     source_area = config['source_area']
 
@@ -436,19 +450,54 @@ def read_measurement_geometry(file_path):
     return sources, retros
 
 
-def plot_simulation_domain(sources, retros, origin, draw_beams=False, plot_3d=True):
-    fig = plt.figure(figsize=(8, 8))
+def plot_simulation_domain(sources, retros, origin, draw_beams=False, plot_3d=True, fig=None, ax=None):
+    """Plots the simulation domain. If fig and ax are not provided, creates a new figure and axes.
+    Parameters
+    ----------
+    sources : pd.DataFrame
+        Dataframe of source locations. Must have columns x, y, z.
+    retros : pd.DataFrame
+        Dataframe of retro locations. Must have columns x, y, z.
+    origin : array-like
+        3x1 array of x, y, z coordinates of the tower.
+    draw_beams : bool, optional
+        Whether to draw lines between the tower and each retro. The default is False.
+    plot_3d : bool, optional
+        Whether to plot in 3D. The default is True.
+    fig : matplotlib.figure.Figure, optional
+        Figure to plot on. If None, creates a new figure. The default is None.
+    ax : matplotlib.axes.Axes, optional
+        Axes to plot on. If None, creates a new axes. The default is None.
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        Figure containing the plot.
+    ax : matplotlib.axes.Axes
+        Axes containing the plot.
+
+        """
+    if fig is None and ax is None:
+        fig = plt.figure(figsize=(8, 8))
 
     if plot_3d:
-        ax = fig.add_subplot(111, projection='3d')
-        ax.set_zlabel('Z')
-    else:
-        ax = fig.add_subplot(111)
-        ax.axis('equal')
 
-    ax.scatter(sources.x, sources.y, sources.z, color='C0', label='Sources')
-    ax.scatter(retros.x, retros.y, retros.z, color='C1', label='Retros')
-    ax.scatter(origin[0], origin[1], origin[2], color='C2', label='Tower')
+        if ax is None:
+            ax = fig.add_subplot(111, projection='3d')
+            ax.set_zlabel('Z')
+
+        ax.scatter(sources.x, sources.y, sources.z, color='C0', label='Sources')
+        ax.scatter(retros.x, retros.y, retros.z, color='C1', label='Retros')
+        ax.scatter(origin[0], origin[1], origin[2], color='C2', label='Tower')
+
+    else:
+        if ax is None:
+            ax = fig.add_subplot(111)
+            ax.axis('equal')
+
+        ax.scatter(sources.x, sources.y, color='C0', label='Sources')
+        ax.scatter(retros.x, retros.y, color='C1', label='Retros')
+        ax.scatter(origin[0], origin[1], color='C2', label='Tower')
 
     if draw_beams:  # Plot lines between the origin and each retro
         for i in range(len(retros)):
@@ -458,7 +507,6 @@ def plot_simulation_domain(sources, retros, origin, draw_beams=False, plot_3d=Tr
     ax.set_xlabel('X')
     ax.set_ylabel('Y')
     ax.legend()
-    # Make axes equal, repliating plt.axes('equal') for 3d projection: BUG: Not sure if this is working
     plt.show()
 
 
@@ -481,3 +529,206 @@ def plot_retro_z_profiles(retros):
     plt.figure()
     for i, (x, y) in enumerate(retros.groupby(['x', 'y'])):
         sns.lineplot(x='z', y='measurement', data=y, label='%.0f, %.0f' % x)
+
+
+def create_beam_info(sim_info):
+    beam_info = pd.DataFrame(sim_info['beam_info_list'])
+    beam_info['max_at_end'] = beam_info.end_of_beam_concentration == beam_info.max_local_concentration
+    beam_info['retro_max_ratio'] = beam_info.max_local_concentration / beam_info.end_of_beam_concentration
+
+    return beam_info
+
+
+def fiter_beam_info(beam_info):
+    beam_info = beam_info[beam_info.end_of_beam_concentration > 1e-4]
+    beam_info = beam_info[beam_info.max_local_concentration > 1e-4]
+
+    return beam_info
+
+
+def get_meas_field(summary, z):
+    '''returns a field of synthetic DCS measurements at a given retro height from the output of a simulation.
+    Parameters
+    ----------
+    summary : pd.DataFrame
+        Dataframe containing the synthetic measurements.
+    z : float
+        Height at which to plot the field. Must exist within summary dataframe.
+    Returns
+    -------
+    meas_field : np.ndarray
+        2D array of synthetic measurements at the given height.
+    X, Y : np.ndarray
+        2D arrays of x and y coordinates of the measurement field.
+        '''
+
+    if z not in summary.z.unique():
+        raise ValueError(f'z = {z} is not a valid height. Must be one of {summary.z.unique()}')
+
+    meas_field = summary.query(f'z == {z}').pivot(index='y', columns='x', values='measurement')
+    X = summary.query(f'z == {z}').pivot(index='y', columns='x', values='x')
+    Y = summary.query(f'z == {z}').pivot(index='y', columns='x', values='y')
+
+    return meas_field, X, Y
+
+
+def plot_meas_field(X, Y, meas_field, ax=None, vmin=1e-3, vmax=None, detection_threshold=3e-3, colorbar=True):
+    '''Plots a synthetic DCS measurement field.
+    Parameters
+    ----------
+    X, Y : np.ndarray
+        2D array of x coordinates of the measurement field.
+    meas_field : np.ndarray
+        2D array of synthetic measurements at the given height.
+    ax : matplotlib.axes.Axes, optional
+        Axes to plot on. If None, creates a new figure and axes.
+    show_retros : bool, optional
+        Whether to plot the retros in the field. The default is True.
+    vmin : float, optional
+        Minimum value for the colorbar. This should represent DCS detection limit
+    vmax : float, optional
+        Maximum value for the colorbar. Used to synchromize plotting. Default is None.
+    detection_threshold : float, optional
+        Threshold for detection. Used to plot the detection threshold as a contour.
+    Returns
+    -------
+    None.'''
+
+    if ax is None:
+        fig, ax = plt.subplots()
+
+    ax.pcolormesh(X, Y, meas_field, cmap=cm.davos, norm=colors.LogNorm(vmin=vmin, vmax=vmax))
+    ax.contour(X, Y, meas_field, levels=[detection_threshold], colors='k', linestyles='--',
+               label=f'Detection Limit {1000 * detection_threshold:.1e} ppb')
+    ax.set_aspect('equal')
+
+    if colorbar:
+        cbar = ax.figure.colorbar(ax.collections[0], ax=ax, location='bottom', orientation='horizontal')
+        cbar.set_label('[ppb]')
+        cbar.ax.xaxis.set_major_formatter(ticker.FuncFormatter(format_ticks))
+        cbar.ax.xaxis.set_minor_formatter(ticker.FuncFormatter(format_ticks))
+
+        # cbar.ax.set_yticklabels(cbar.ax.get_yticklabels(), rotation=90)
+
+    ax.set_xlim([np.min(X), np.max(X)])
+    ax.set_ylim([np.min(Y), np.max(Y)])
+
+
+def format_ticks(value, tick_number):
+    # Used to turn ppm to ppb in colorbar and remove x10^ uncessary characeters
+    return f'{1000 * value:.1f}'
+
+
+def plot_delta_z(summary, z_vals, vmax_plot=.1):
+    """Plots a synthetic DCS measurement field.
+    Parameters
+    ----------
+    summary : pd.DataFrame
+        Dataframe containing the synthetic measurements.
+    z_vals : list
+        List of heights at which to plot the field. Must exist within summary dataframe.
+    vmax_plot : float, optional
+        Maximum value for the colorbar. Used to synchromize plotting.
+    """
+
+    meas_0, X, Y = get_meas_field(summary, z_vals[0])
+    meas_z, _, _ = get_meas_field(summary, z_vals[1])  # X, y field should be the same for all z
+
+    fig, ax = plt.subplots(1, 3, figsize=(8, 4), sharex=True, sharey=True)
+    plot_meas_field(X, Y, meas_0, ax=ax[0], vmax=vmax_plot)
+    plot_meas_field(X, Y, meas_z, ax=ax[1], vmax=vmax_plot, colorbar=False)
+    plot_meas_field(X, Y, meas_0 - meas_z, ax=ax[2], vmax=vmax_plot, colorbar=False)
+
+    ax[0].set_title(f'z = {z_vals[0]} m')
+    ax[1].set_title(f'z = {z_vals[1]} m')
+    ax[2].set_title(f'z = {z_vals[0]} - {z_vals[1]} m')
+    plt.tight_layout()
+
+
+def simulate_stacked_retros(u, stability, u_dir=0, plot=False, save_fig_dir=None,
+                            save_plot=False, config_file='geometry_config.yaml'):
+    """simulate a set of stacked retros for a given stability and wind speed
+    Parameters
+    ----------
+    u : float
+        Wind speed [m/s]
+    stability : str
+        Stability class. One of A, B, C, D, E, F
+    u_dir : float, optional
+        Wind direction. The default is 0. TODO: Units?
+    plot : bool, optional
+        Whether to plot the results. The default is False.
+    save_fig_dir : str, optional
+        Directory to save the figure (Including the filename). The default is None.
+    save_plot : bool, optional
+        Whether to save the figure. The default is False.
+    config_file : str, optional
+        Path to the config file. The default is 'geometry_config.yaml'."""
+
+    config = read_measurement_geometry(config_file)
+    sources, retros = create_measurement_geometry(config)
+    origin = config['origin']
+
+    print('Running stability %s_%f mps.png' % (stability, u))
+    pics, sim_info = get_synthetic_measurement(retros,
+                                               sources,
+                                               origin,
+                                               u_mag=u,
+                                               u_dir=u_dir,
+                                               stability=stability,
+                                               plot=False,  # this is along beam plotting. Super slow. Keep off.
+                                               )
+
+    lg = np.array(np.sqrt(retros.x ** 2 + retros.y ** 2))  # approx distance. TODO: Take z into account here
+    avg_conc = pics / lg
+
+    beam_info = create_beam_info(sim_info)
+
+    summary = pd.merge(retros, beam_info, how='outer', left_index=True, right_index=True)
+
+    summary['measurement'] = avg_conc
+    summary['x_rel'] = summary.x - summary.x.mean()
+    summary['y_rel'] = summary.y - summary.y.mean()
+
+    summary['stability'] = stability
+    summary['u'] = u
+
+    if plot:
+        plot_delta_z(summary, z_vals=config['span_retro_z'], vmax_plot=.02)
+        plt.gcf().suptitle('%s stability, %.1f m/s' % (stability, u))
+
+    if save_plot:
+        plt.savefig(save_fig_dir, dpi=300)
+        plt.close('all')
+
+    return summary
+
+
+def get_contour_coordinates(X, Y, C, contour_level):
+    """
+    Get coordinates of a contour at a specified level.
+
+    Parameters:
+    - X: 2D array, X-coordinates of the data grid.
+    - Y: 2D array, Y-coordinates of the data grid.
+    - C: 2D array, data values corresponding to X and Y.
+    - contour_level: float, the contour level of interest.
+
+    Returns:
+    - contour_coordinates: list of arrays, each array contains (x, y) coordinates of the contour.
+
+    *** CHAT-GPT Written ***
+
+    """
+
+    # Create a contour plot to extract contour coordinates
+    fig1 = plt.figure()
+    contour = plt.contour(X, Y, C, levels=[contour_level])
+    plt.close(fig1)
+    #TODO: is there a better way to do this without generating and closing a figure?
+
+    # Extract the coordinates of the specified contour level
+    contour_paths = contour.collections[0].get_paths()
+    contour_coordinates = [path.vertices for path in contour_paths]
+
+    return np.array(contour_coordinates[0])
