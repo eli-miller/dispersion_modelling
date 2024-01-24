@@ -14,7 +14,9 @@ import seaborn as sns
 import tqdm
 import yaml
 from matplotlib import colors
+from numba import njit
 from scipy.optimize import minimize, Bounds
+
 
 ############################################################################################################
 # Functions for simulating a single retroreflector
@@ -31,23 +33,47 @@ def line_points(start, end, num_pts=5000):
     return np.array([xs, ys, zs]).T
 
 
-def l_to_PG(l):
+def l_to_PG(l, method='Munoz'):
     '''Turns obukhov length into Pasquill-Gifford stability class based on table 1 from Munoz Esparaza
     Note that our function for dispersion coefficcients below does not have class G, so we will use F instead.
     Also this paper does not have a class E (slightly stable)... TODO: figure this out.
     l: obukhov length in m
 
+    # TODO: See Foken Micrometerology Page 317 (Table 8.3) for another classification scheme
+    # TODO: See Table A.5 in the appendix of the below paper:Estimating the Flammable Mass of a Vapor Cloud
+    # by John L. Woodward 1998
+    https://onlinelibrary.wiley.com/doi/pdf/10.1002/9780470935361.app1
     '''
-    if 0 < l < 200: # Very Stable:
-        return 'F'
-    elif 200 < l < 1000: # Stable
-        return 'F'
-    elif np.abs(l) > 1000: # Near Neutral
-        return 'D'
-    elif -1000 < l < -200: # Unstable
-        return 'B'
-    elif -200 < l < 0: # Very Unstable
-        return 'A'
+
+    if method == 'Munoz':
+
+        if 0 < l < 200:  # Very Stable:
+            return 'F'
+        elif 200 < l < 1000:  # Stable
+            return 'F'
+        elif np.abs(l) > 1000:  # Near Neutral
+            return 'D'
+        elif -1000 < l < -200:  # Unstable
+            return 'B'
+        elif -200 < l < 0:  # Very Unstable
+            return 'A'
+
+    elif method == 'Foken':
+        if -30 < l < 0:
+            return 'A'
+        elif -100 < l < -30:
+            return 'B'
+        elif -3000 < l < -100:
+            return 'C'
+        elif 0 < l < 60:
+            return 'F'
+        elif 60 < l < 250:
+            return 'E'
+        elif 250 < l < 5000:
+            return 'D'
+
+    elif method == 'Woodward':
+        raise NotImplementedError
 
 
 def dispersion_coeffs(stability):
@@ -88,7 +114,8 @@ def general_concentration(beam_loc, source_loc, Q, u_mag, u_dir, stability="E"):
     z_glob = z - z0  # Not necessary for ground-based sources
 
     # Figure out how much to rotate in the xy plane from GP formulation
-    phi = np.arctan2(y_glob, x_glob)  # Angle of laser point from east axis from x0y0
+    phi = np.arctan2(y_glob,
+                     x_glob)  # Angle of laser point from east axis from x0y0
 
     l_xy = np.sqrt(x_glob ** 2 + y_glob ** 2)
     # New coordinates
@@ -100,8 +127,10 @@ def general_concentration(beam_loc, source_loc, Q, u_mag, u_dir, stability="E"):
 
     # C = Q/(2*pi*sigma_y*sigma_z*u)  * exp(-y_prime**2/(2*sigma_y**2)) * (exp(-(z_glob)**2/(2*sigma_z**2))+exp(-(z_glob)**2/(2*sigma_z**2)))
     h = 0
-    C = Q / (2 * np.pi * u_mag * sigma_y * sigma_z) * np.exp(-0.5 * y_prime ** 2 / sigma_y ** 2) * \
-        (np.exp(-0.5 * (z - h) ** 2 / sigma_z ** 2) + np.exp(-0.5 * (z + h) ** 2 / sigma_z ** 2))
+    C = Q / (2 * np.pi * u_mag * sigma_y * sigma_z) * np.exp(
+        -0.5 * y_prime ** 2 / sigma_y ** 2) * \
+        (np.exp(-0.5 * (z - h) ** 2 / sigma_z ** 2) + np.exp(
+            -0.5 * (z + h) ** 2 / sigma_z ** 2))
 
     C *= 24.45 / 16.04 * 1e6  # Convert from kg/m^3 to ppm
 
@@ -144,7 +173,8 @@ def plume_contribution(beam_loc, source_loc, Q, u_mag, u_dir):
     z_glob = z - z0
 
     # Figure out how much to rotate in the xy plane from GP formulation
-    phi = np.arctan2(y_glob, x_glob)  # Angle of laser point from east axis from x0y0
+    phi = np.arctan2(y_glob,
+                     x_glob)  # Angle of laser point from east axis from x0y0
 
     l_xy = np.sqrt(x_glob ** 2 + y_glob ** 2)
     # New coordinates
@@ -164,7 +194,8 @@ def plume_contribution(beam_loc, source_loc, Q, u_mag, u_dir):
     return Conc
 
 
-def get_synthetic_measurement(retros, sources, origin, u_mag, u_dir, stability="A", pts_per_beam=10000, plot=True):
+def get_synthetic_measurement(retros, sources, origin, u_mag, u_dir,
+                              stability="A", pts_per_beam=10000, plot=True):
     # plume_contribution(beam_loc, source_loc, Q, u_mag, u_dir):
     if plot:
         fig, (ax, ax1) = plt.subplots(2, 1, sharex=True)
@@ -178,12 +209,14 @@ def get_synthetic_measurement(retros, sources, origin, u_mag, u_dir, stability="
     for i_retro in tqdm.tqdm(range(len(retros))):
 
         beam_pts = line_points(origin, np.array(retros.iloc[i_retro, :]))
-        segment_length = np.sqrt(np.sum((beam_pts[-1, :] - beam_pts[0, :]) ** 2)) / pts_per_beam
+        segment_length = np.sqrt(
+            np.sum((beam_pts[-1, :] - beam_pts[0, :]) ** 2)) / pts_per_beam
 
         conc_store = np.zeros((len(beam_pts), len(sources)))
 
         for i_source in range(len(sources)):
-            conc_store[:, i_source] = general_concentration(  # plume_contribution(
+            conc_store[:, i_source] = general_concentration(
+                # plume_contribution(
                 beam_pts,
                 sources[['x', 'y', 'z']].iloc[i_source],
                 sources['strength'].iloc[i_source],
@@ -191,7 +224,8 @@ def get_synthetic_measurement(retros, sources, origin, u_mag, u_dir, stability="
                 u_dir,
                 stability=stability)
 
-        conc_resolved = np.sum(conc_store, axis=1)  # retain for visulaization / debugging
+        conc_resolved = np.sum(conc_store,
+                               axis=1)  # retain for visulaization / debugging
         pic[i_retro] = np.sum(conc_resolved * segment_length, axis=0)
         # See https://teesing.com/media/library/tools/understanding-units-of-measurement.pdf for units
 
@@ -212,7 +246,8 @@ def get_synthetic_measurement(retros, sources, origin, u_mag, u_dir, stability="
             max_beam_info = {
                 'retro_index': i_retro,
                 'max_concentration': max_conc,
-                'max_concentration_location': beam_pts[np.argmax(conc_resolved)],
+                'max_concentration_location': beam_pts[
+                    np.argmax(conc_resolved)],
             }
 
         if plot:
@@ -225,9 +260,11 @@ def get_synthetic_measurement(retros, sources, origin, u_mag, u_dir, stability="
                                     vmax=max_conc
                                     )
             ax1.set_ylabel('ppm')
-            ax.scatter(retros['y'].iloc[i_retro], retros['z'].iloc[i_retro], marker='x',
+            ax.scatter(retros['y'].iloc[i_retro], retros['z'].iloc[i_retro],
+                       marker='x',
                        label=str(np.round(pic[i_retro], 2)) + 'ppm-m')
-            ax.set_title('Wind: %.1f m/s, Direction: %.0f, Class: %s' % (u_mag, np.degrees(u_dir), stability))
+            ax.set_title('Wind: %.1f m/s, Direction: %.0f, Class: %s' % (
+                u_mag, np.degrees(u_dir), stability))
             ax.plot([0, np.max(retros.y)], [21, 21], '--k')  #
     if plot:
         ax.legend()
@@ -241,6 +278,7 @@ def get_synthetic_measurement(retros, sources, origin, u_mag, u_dir, stability="
 
     return pic, sim_info  # len = n_retros
 
+
 ############################################################################################################
 # Functions for VRPM Fitting
 ############################################################################################################
@@ -251,7 +289,8 @@ def polar_gaussian2d_simplified(A, mu_y, sigma_y, sigma_z, r, theta):
         NOTE: there is an error in the paper. Should be plus in the exponential...'''
 
     return A / (2 * np.pi * sigma_y * sigma_z) * np.exp(
-        -1 / 2 * (((r * np.cos(theta) - mu_y) ** 2 / sigma_y ** 2) + ((r * np.sin(theta)) ** 2 / sigma_z ** 2)))
+        -1 / 2 * (((r * np.cos(theta) - mu_y) ** 2 / sigma_y ** 2) + (
+                (r * np.sin(theta)) ** 2 / sigma_z ** 2)))
 
 
 def new_objective_fun(inputarray, retros, origin, pics, pts_per_beam=50000):
@@ -271,14 +310,16 @@ def new_objective_fun(inputarray, retros, origin, pics, pts_per_beam=50000):
     offset = retros - origin  # need to change back to global coords later
     rs = np.sqrt(((offset) ** 2).sum(axis=1))  # Dataframe of radii
 
-    thetas = np.array(np.arctan2(offset.z, offset.y))  # Assume angle in the y-z plane [radians]
+    thetas = np.array(np.arctan2(offset.z,
+                                 offset.y))  # Assume angle in the y-z plane [radians]
 
     r_beam = np.linspace(0, rs, pts_per_beam)
 
     pic_candidate = np.zeros((len(rs),))
 
     for i in range(len(rs)):
-        conc_along_beam = polar_gaussian2d_simplified(A, mu_y, sigma_y, sigma_z, r_beam[:, i], thetas[i])
+        conc_along_beam = polar_gaussian2d_simplified(A, mu_y, sigma_y, sigma_z,
+                                                      r_beam[:, i], thetas[i])
         pic_candidate[i] = np.sum(conc_along_beam * rs[i] / pts_per_beam)
 
     SSE = np.sum((pics - pic_candidate) ** 2)
@@ -287,7 +328,8 @@ def new_objective_fun(inputarray, retros, origin, pics, pts_per_beam=50000):
     return SSE
 
 
-def fit_bivariate_gauss(pics, u_mag, u_dir, retros, origin, plot=False, verbose=False, x0=None, bnds=None):
+def fit_bivariate_gauss(pics, u_mag, u_dir, retros, origin, plot=False,
+                        verbose=False, x0=None, bnds=None):
     if x0 is None:  # Give standard initial guess.
         x0 = [5 * pics[2], 1500, 10, 2.6]
     else:
@@ -296,7 +338,8 @@ def fit_bivariate_gauss(pics, u_mag, u_dir, retros, origin, plot=False, verbose=
     # TODO: Move initial guess outside of this function and into main script
     if bnds is None:
         # bnds = Bounds((0, 14001400, -np.inf, -np.inf), (1e9, 2000, np.inf, np.inf))
-        bnds = Bounds((-np.inf, -np.inf, -np.inf, -np.inf), (np.inf, np.inf, np.inf, np.inf))
+        bnds = Bounds((-np.inf, -np.inf, -np.inf, -np.inf),
+                      (np.inf, np.inf, np.inf, np.inf))
     else:
         pass
 
@@ -323,7 +366,8 @@ def fit_bivariate_gauss(pics, u_mag, u_dir, retros, origin, plot=False, verbose=
 
     flux_grid_pts = 500
 
-    y_flux = np.linspace(mu_y_fit - 3 * sigma_y_fit, mu_y_fit + 3 * sigma_y_fit, flux_grid_pts)
+    y_flux = np.linspace(mu_y_fit - 3 * sigma_y_fit, mu_y_fit + 3 * sigma_y_fit,
+                         flux_grid_pts)
     y_flux_rel = y_flux  # - origin[1]
 
     z_flux = np.linspace(0, 3 * sigma_z_fit, flux_grid_pts)
@@ -339,10 +383,12 @@ def fit_bivariate_gauss(pics, u_mag, u_dir, retros, origin, plot=False, verbose=
 
     cell_areas = R_flux * dr * dtheta
 
-    fit_conc = polar_gaussian2d_simplified(A_fit, mu_y_fit, sigma_y_fit, sigma_z_fit, R_flux, Theta_flux)
+    fit_conc = polar_gaussian2d_simplified(A_fit, mu_y_fit, sigma_y_fit,
+                                           sigma_z_fit, R_flux, Theta_flux)
 
     area = (y_flux[-1] - y_flux[0]) * (z_flux[-1] - z_flux[0])
-    fit_flux = 16.04 / (24.45 * 1000) * (fit_conc * cell_areas).sum() * u_mag * np.cos(u_dir)
+    fit_flux = 16.04 / (24.45 * 1000) * (
+            fit_conc * cell_areas).sum() * u_mag * np.cos(u_dir)
 
     if plot:
         plt.pcolormesh(y_flux, z_flux, fit_conc)
@@ -361,7 +407,8 @@ def visualize_bivariate(inputs, ax=None):
 
     flux_grid_pts = 500
 
-    y_flux = np.linspace(mu_y_fit - 3 * sigma_y_fit, mu_y_fit + 3 * sigma_y_fit, flux_grid_pts)
+    y_flux = np.linspace(mu_y_fit - 3 * sigma_y_fit, mu_y_fit + 3 * sigma_y_fit,
+                         flux_grid_pts)
     y_flux_rel = y_flux  # - origin[1]
 
     z_flux = np.linspace(0, 3 * sigma_z_fit, flux_grid_pts)
@@ -372,7 +419,8 @@ def visualize_bivariate(inputs, ax=None):
     R_flux = np.sqrt(Y_flux_rel ** 2 + Z_flux_rel ** 2)
     Theta_flux = np.arctan2(Z_flux_rel, Y_flux_rel)
 
-    fit_conc = polar_gaussian2d_simplified(A_fit, mu_y_fit, sigma_y_fit, sigma_z_fit, R_flux, Theta_flux)
+    fit_conc = polar_gaussian2d_simplified(A_fit, mu_y_fit, sigma_y_fit,
+                                           sigma_z_fit, R_flux, Theta_flux)
 
     if ax is not None:
         CS = ax.contour(y_flux,
@@ -385,6 +433,7 @@ def visualize_bivariate(inputs, ax=None):
 
     else:
         plt.contour(y_flux, z_flux, fit_conc)
+
 
 ############################################################################################################
 # Function for Simulating DCS Measurements
@@ -426,8 +475,10 @@ def create_measurement_geometry(config):
     retro_loc_y = config['retro_loc_y']
 
     sources_x, sources_y = np.meshgrid(
-        source_loc_x + np.linspace(span_source_x[0], span_source_x[1], n_source_x),
-        source_loc_y + np.linspace(span_source_y[0], span_source_y[1], n_source_y)
+        source_loc_x + np.linspace(span_source_x[0], span_source_x[1],
+                                   n_source_x),
+        source_loc_y + np.linspace(span_source_y[0], span_source_y[1],
+                                   n_source_y)
     )
 
     Q_source = (Q_source_total * source_area) / len(sources_x.ravel())
@@ -438,10 +489,11 @@ def create_measurement_geometry(config):
                             'z': source_loc_z,
                             'strength': Q_source})
 
-    retros_x, retros_y, retros_z = np.meshgrid(retro_loc_x + np.linspace(span_retro_x[0], span_retro_x[1], n_retro_x),
-                                               retro_loc_y + np.linspace(span_retro_y[0], span_retro_y[1], n_retro_y),
-                                               np.linspace(span_retro_z[0], span_retro_z[1], n_retro_z)
-                                               )
+    retros_x, retros_y, retros_z = np.meshgrid(
+        retro_loc_x + np.linspace(span_retro_x[0], span_retro_x[1], n_retro_x),
+        retro_loc_y + np.linspace(span_retro_y[0], span_retro_y[1], n_retro_y),
+        np.linspace(span_retro_z[0], span_retro_z[1], n_retro_z)
+    )
 
     retros = pd.DataFrame({'x': retros_x.ravel(),
                            'y': retros_y.ravel(),
@@ -450,7 +502,8 @@ def create_measurement_geometry(config):
     return sources, retros
 
 
-def plot_simulation_domain(sources, retros, origin, draw_beams=False, plot_3d=True, fig=None, ax=None):
+def plot_simulation_domain(sources, retros, origin, draw_beams=False,
+                           plot_3d=True, fig=None, ax=None):
     """Plots the simulation domain. If fig and ax are not provided, creates a new figure and axes.
     Parameters
     ----------
@@ -501,7 +554,9 @@ def plot_simulation_domain(sources, retros, origin, draw_beams=False, plot_3d=Tr
 
     if draw_beams:  # Plot lines between the origin and each retro
         for i in range(len(retros)):
-            ax.plot([origin[0], retros.x.iloc[i]], [origin[1], retros.y.iloc[i]], [origin[2], retros.z.iloc[i]],
+            ax.plot([origin[0], retros.x.iloc[i]],
+                    [origin[1], retros.y.iloc[i]],
+                    [origin[2], retros.z.iloc[i]],
                     color='green', alpha=.5)
 
     ax.set_xlabel('X')
@@ -533,8 +588,10 @@ def plot_retro_z_profiles(retros):
 
 def create_beam_info(sim_info):
     beam_info = pd.DataFrame(sim_info['beam_info_list'])
-    beam_info['max_at_end'] = beam_info.end_of_beam_concentration == beam_info.max_local_concentration
-    beam_info['retro_max_ratio'] = beam_info.max_local_concentration / beam_info.end_of_beam_concentration
+    beam_info[
+        'max_at_end'] = beam_info.end_of_beam_concentration == beam_info.max_local_concentration
+    beam_info[
+        'retro_max_ratio'] = beam_info.max_local_concentration / beam_info.end_of_beam_concentration
 
     return beam_info
 
@@ -563,16 +620,19 @@ def get_meas_field(summary, z):
         '''
 
     if z not in summary.z.unique():
-        raise ValueError(f'z = {z} is not a valid height. Must be one of {summary.z.unique()}')
+        raise ValueError(
+            f'z = {z} is not a valid height. Must be one of {summary.z.unique()}')
 
-    meas_field = summary.query(f'z == {z}').pivot(index='y', columns='x', values='measurement')
+    meas_field = summary.query(f'z == {z}').pivot(index='y', columns='x',
+                                                  values='measurement')
     X = summary.query(f'z == {z}').pivot(index='y', columns='x', values='x')
     Y = summary.query(f'z == {z}').pivot(index='y', columns='x', values='y')
 
     return meas_field, X, Y
 
 
-def plot_meas_field(X, Y, meas_field, ax=None, vmin=1e-3, vmax=None, detection_threshold=3e-3, colorbar=True):
+def plot_meas_field(X, Y, meas_field, ax=None, vmin=1e-3, vmax=None,
+                    detection_threshold=3e-3, colorbar=True):
     '''Plots a synthetic DCS measurement field.
     Parameters
     ----------
@@ -597,13 +657,16 @@ def plot_meas_field(X, Y, meas_field, ax=None, vmin=1e-3, vmax=None, detection_t
     if ax is None:
         fig, ax = plt.subplots()
 
-    ax.pcolormesh(X, Y, meas_field, cmap=cm.davos, norm=colors.LogNorm(vmin=vmin, vmax=vmax))
-    ax.contour(X, Y, meas_field, levels=[detection_threshold], colors='k', linestyles='--',
+    ax.pcolormesh(X, Y, meas_field, cmap=cm.davos,
+                  norm=colors.LogNorm(vmin=vmin, vmax=vmax))
+    ax.contour(X, Y, meas_field, levels=[detection_threshold], colors='k',
+               linestyles='--',
                label=f'Detection Limit {1000 * detection_threshold:.1e} ppb')
     ax.set_aspect('equal')
 
     if colorbar:
-        cbar = ax.figure.colorbar(ax.collections[0], ax=ax, location='bottom', orientation='horizontal')
+        cbar = ax.figure.colorbar(ax.collections[0], ax=ax, location='bottom',
+                                  orientation='horizontal')
         cbar.set_label('[ppb]')
         cbar.ax.xaxis.set_major_formatter(ticker.FuncFormatter(format_ticks))
         cbar.ax.xaxis.set_minor_formatter(ticker.FuncFormatter(format_ticks))
@@ -632,12 +695,14 @@ def plot_delta_z(summary, z_vals, vmax_plot=.1):
     """
 
     meas_0, X, Y = get_meas_field(summary, z_vals[0])
-    meas_z, _, _ = get_meas_field(summary, z_vals[1])  # X, y field should be the same for all z
+    meas_z, _, _ = get_meas_field(summary, z_vals[
+        1])  # X, y field should be the same for all z
 
     fig, ax = plt.subplots(1, 3, figsize=(8, 4), sharex=True, sharey=True)
     plot_meas_field(X, Y, meas_0, ax=ax[0], vmax=vmax_plot)
     plot_meas_field(X, Y, meas_z, ax=ax[1], vmax=vmax_plot, colorbar=False)
-    plot_meas_field(X, Y, meas_0 - meas_z, ax=ax[2], vmax=vmax_plot, colorbar=False)
+    plot_meas_field(X, Y, meas_0 - meas_z, ax=ax[2], vmax=vmax_plot,
+                    colorbar=False)
 
     ax[0].set_title(f'z = {z_vals[0]} m')
     ax[1].set_title(f'z = {z_vals[1]} m')
@@ -645,8 +710,10 @@ def plot_delta_z(summary, z_vals, vmax_plot=.1):
     plt.tight_layout()
 
 
-def simulate_stacked_retros(u, stability, u_dir=0, plot=False, save_fig_dir=None,
-                            save_plot=False, config_file='geometry_config.yaml'):
+def simulate_stacked_retros(u, stability, u_dir=0, plot=False,
+                            save_fig_dir=None,
+                            save_plot=False,
+                            config_file='geometry_config.yaml'):
     """simulate a set of stacked retros for a given stability and wind speed
     Parameters
     ----------
@@ -676,15 +743,18 @@ def simulate_stacked_retros(u, stability, u_dir=0, plot=False, save_fig_dir=None
                                                u_mag=u,
                                                u_dir=u_dir,
                                                stability=stability,
-                                               plot=False,  # this is along beam plotting. Super slow. Keep off.
+                                               plot=False,
+                                               # this is along beam plotting. Super slow. Keep off.
                                                )
 
-    lg = np.array(np.sqrt(retros.x ** 2 + retros.y ** 2))  # approx distance. TODO: Take z into account here
+    lg = np.array(np.sqrt(
+        retros.x ** 2 + retros.y ** 2))  # approx distance. TODO: Take z into account here
     avg_conc = pics / lg
 
     beam_info = create_beam_info(sim_info)
 
-    summary = pd.merge(retros, beam_info, how='outer', left_index=True, right_index=True)
+    summary = pd.merge(retros, beam_info, how='outer', left_index=True,
+                       right_index=True)
 
     summary['measurement'] = avg_conc
     summary['x_rel'] = summary.x - summary.x.mean()
@@ -725,7 +795,7 @@ def get_contour_coordinates(X, Y, C, contour_level):
     fig1 = plt.figure()
     contour = plt.contour(X, Y, C, levels=[contour_level])
     plt.close(fig1)
-    #TODO: is there a better way to do this without generating and closing a figure?
+    # TODO: is there a better way to do this without generating and closing a figure?
 
     # Extract the coordinates of the specified contour level
     contour_paths = contour.collections[0].get_paths()
