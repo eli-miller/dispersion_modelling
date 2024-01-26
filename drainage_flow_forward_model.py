@@ -6,6 +6,9 @@ import VRPM_functions
 from icecream import ic
 import seaborn as sns
 
+plt.style.use("eli_default")
+
+
 config_name = "drainage_flow.yaml"
 config = VRPM_functions.read_measurement_geometry(config_name)
 sources, retros, point_sensors = VRPM_functions.create_measurement_geometry(
@@ -20,15 +23,6 @@ point_sensor_names = config["point_sensor_names"]
 input_met_data = pd.read_csv(
     "input_met_data.csv", index_col=0, parse_dates=True
 ).dropna()
-
-# Replace input_met_data with a synthetic dataset. Sweep through wind speed, wind direction, and stability
-input_met_data = pd.DataFrame()
-input_met_data["wind_dir"] = np.linspace(0, 360, 6)
-input_met_data["wind_speed"] = np.ones_like(input_met_data["wind_dir"])
-input_met_data["stability"] = "C"
-input_met_data["datetime"] = pd.date_range(
-    start="2024-01-01 00:00:00", periods=len(input_met_data), freq="H"
-)
 
 fig, axs = VRPM_functions.plot_simulation_domain(
     sources, retros, config["origin"], draw_beams=True
@@ -54,7 +48,7 @@ for index, row in input_met_data.iterrows():
         u_mag=row["wind_speed"],
         u_dir=converted_wind_directon,
         stability=row["stability"],
-        plot=True,
+        plot=False,
     )
 
     # Get the measurements at each point sensor using general_concentration
@@ -110,24 +104,28 @@ plt.figure()
 ]
 
 
+ic(simulation_results.max(numeric_only=True))
+
+
 # %%
-# Compute the cartesian distance between each retro and the source and print
-# Add retro names to the retros df
-retros["name"] = retro_names
 
-for retro_name in retro_names:
-    retro_loc = retros[retros.name == retro_name][["x", "y", "z"]].iloc[0]
-    source_loc = sources[["x", "y", "z"]].iloc[0]
-    distance = np.linalg.norm(retro_loc - source_loc)
-    print(f"Distance between {retro_name} and source: {distance} m")
+# plot results for all columns that end with "retro"
+plt.figure()
+[
+    sns.lineplot(data=simulation_results, x="datetime", y=retro_name, label=retro_name)
+    for retro_name in retro_names
+]
+plt.legend()
 
-# Add point sensor names to the point_sensors df
-point_sensors["name"] = point_sensor_names
-# Repeat for the point sensors
-for point_sensor_name in point_sensor_names:
-    point_sensor_loc = point_sensors[point_sensors.name == point_sensor_name][
-        ["x", "y", "z"]
-    ].iloc[0]
-    source_loc = sources[["x", "y", "z"]].iloc[0]
-    distance = np.linalg.norm(point_sensor_loc - source_loc)
-    print(f"Distance between {point_sensor_name} and source: {distance} m")
+
+# repeat for point sensors
+plt.figure()
+[
+    sns.lineplot(
+        data=simulation_results,
+        x="datetime",
+        y=point_sensor_name,
+        label=point_sensor_name,
+    )
+    for point_sensor_name in point_sensor_names
+]

@@ -12,8 +12,8 @@ source_loc_y: 2500
 source_loc_x: 0
 source_loc_z: 0 # Keep zero
 
-n_retro_x: 150
-n_retro_y: 40
+n_retro_x: 5
+n_retro_y: 4
 n_retro_z: 2 # Use 2 for compatibiltiy with plot_delta_z functionality
 
 span_retro_x: [-5, 205]

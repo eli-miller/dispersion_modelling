@@ -1,6 +1,6 @@
 Q_source_total: 8760 #1168 # from Clayton paper, max possible. # 620 is 10x katey anecdodal # 62 is from katey in meeting  # g/m^2/year 10x to get ground level conc. to match
 source_area: 600  # m^2
-origin: [ 0, 0, 1 ]
+origin: [ 0, 0, 230]
 
 source_locs:
   - [-1866, 1055, 0 ]
@@ -11,9 +11,9 @@ retro_locs:
   - [ -1857, 1106, 1.32 ]
 
 retro_names:
-  - "SouthBracket"
-  - "LandBridge"
-  - "NorthEastBracket"
+  - "SouthBracket_retro"
+  - "LandBridge_retro"
+  - "NorthEastBracket_retro"
 
 point_sensor_locs:
   - [ -2077, 746, 1.14 ]
@@ -23,8 +23,8 @@ point_sensor_locs:
   - [-1870, 1055, .5 ]
 
 point_sensor_names:
-  - "SouthBracket"
-  - "LandBridge"
-  - "NorthEastBracket"
-  - "EC_tower"
-  - "downwind_4m"
+  - "SouthBracket_point_sensor"
+  - "LandBridge_point_sensor"
+  - "NorthEastBracket_point_sensor"
+  - "EC_tower_point_sensor"
+  - "downwind_4m_point_sensor"
