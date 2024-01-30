@@ -20,11 +20,11 @@ point_sensor_locs:
   - [ -1889, 1040, 1.22 ]
   - [ -1857, 1106, 1.32 ]
   - [ -1994,    927, 2.25 ]
-  - [-1870, 1055, .5 ]
+#  - [-1870, 1055, .5 ]
 
 point_sensor_names:
   - "SouthBracket_point_sensor"
   - "LandBridge_point_sensor"
   - "NorthEastBracket_point_sensor"
   - "EC_tower_point_sensor"
-  - "downwind_4m_point_sensor"
+#  - "downwind_4m_point_sensor"

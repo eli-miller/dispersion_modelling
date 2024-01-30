@@ -699,7 +699,7 @@ def add_point_sensors_to_domain(point_sensors, axs):
         point_sensors.x,
         point_sensors.y,
         point_sensors.z,
-        color="C4",
+        color="C5",
         label="Point Sensors",
     )
     axs.legend()
@@ -998,7 +998,7 @@ def simulate_stacked_retros(
         u_mag=u,
         u_dir=u_dir,
         stability=stability,
-        plot=True,
+        plot=False,
         # this is along beam plotting. Super slow. Keep off.
     )
 
