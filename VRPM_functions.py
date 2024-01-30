@@ -103,7 +103,7 @@ def dispersion_coeffs(stability):
     return a, b, c, d, e, f
 
 
-# def general_concentration(x,y,z, Q=1, u=1, stability="E"):
+# def general_concentration(x,y,z, Q=1, wind_speed=1, stability="E"):
 def general_concentration(beam_loc, source_loc, Q, u_mag, u_dir, stability="E"):
     """Q [kg/s] emission rate and returns a concentration [ppm] at that point"""
     """ With reflection. Page """
@@ -141,7 +141,7 @@ def general_concentration(beam_loc, source_loc, Q, u_mag, u_dir, stability="E"):
     sigma_y = a * x_prime / (1 + b * x_prime) ** c
     sigma_z = d * x_prime / (1 + e * x_prime) ** f
 
-    # C = Q/(2*pi*sigma_y*sigma_z*u)  * exp(-y_prime**2/(2*sigma_y**2)) * (exp(-(z_glob)**2/(2*sigma_z**2))+exp(-(z_glob)**2/(2*sigma_z**2)))
+    # C = Q/(2*pi*sigma_y*sigma_z*wind_speed)  * exp(-y_prime**2/(2*sigma_y**2)) * (exp(-(z_glob)**2/(2*sigma_z**2))+exp(-(z_glob)**2/(2*sigma_z**2)))
     h = 0
     C = (
         Q
@@ -1018,7 +1018,7 @@ def simulate_stacked_retros(
     summary["y_rel"] = summary.y - summary.y.mean()
 
     summary["stability"] = stability
-    summary["u"] = u
+    summary["wind_speed"] = u
 
     if plot:
         plot_delta_z(summary, z_vals=config["span_retro_z"], vmax_plot=0.02)
@@ -1059,6 +1059,49 @@ def get_contour_coordinates(X, Y, C, contour_level):
     contour_coordinates = [path.vertices for path in contour_paths]
 
     return np.array(contour_coordinates[0])
+
+
+def get_max_contour_locations(contours):
+    """Get the location of the maximum concentration in the contour plot and their coordinates.
+
+    Parameters
+    ----------
+    contours : np.ndarray
+        The coordinates of the contour plot.
+
+    Returns
+    -------
+    x_max_coords : tuple
+        The x-coordinate of the maximum concentration and the corresponding y-coordinate.
+    y_max_coords : tuple
+        The y-coordinate of the maximum concentration and the corresponding x-coordinate.
+    """
+
+    # TODO: this function may be a good place to make sure the contour is closed
+    x_max, y_max = contours.max(axis=0)
+
+    y_at_max_x = contours[contours[:, 0] == x_max, 1]
+    x_at_max_y = contours[contours[:, 1] == y_max, 0]
+
+    # Try to make y_at_max_x and x_at_max_y into scalars. If they are not a single number, then the contour is likely not closed.
+    if len(y_at_max_x) != 1:
+        try:
+            y_at_max_x = float(y_at_max_x)
+        except:
+            raise ValueError(
+                f"y_at_max_x should be a single number. got {y_at_max_x}. \n Check that the contour is closed."
+            )
+    if len(x_at_max_y) != 1:
+        try:
+            x_at_max_y = float(x_at_max_y)
+        except:
+            raise ValueError(
+                f"x_at_max_y should be a single number. got {x_at_max_y}. \n Check that the contour is closed."
+            )
+    x_max_coords = (x_max, y_at_max_x)
+    y_max_coords = (x_at_max_y, y_max)
+
+    return x_max_coords, y_max_coords
 
 
 def convert_wind_direction(direction):
