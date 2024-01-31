@@ -2,10 +2,14 @@ Q_source_total: 8760 #1168 # from Clayton paper, max possible. # 620 is 10x kate
 source_area: 600  # m^2
 origin: [0, 0, 230]
 
-#stability_classes: ["A", "B", "C", "D", "E", "F"]
-wind_speeds: [1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5]
+#stability_classes: ["A", "D"]
+#wind_speeds: [1.5, 7.5]
 
-stability_classes: ["C"]
+stability_classes: ["A", "B", "C", "D", "E", "F"]
+wind_speeds: [1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5]
+wind_directions: [-90] # in meterologial coords. converted in script
+source_strengths: [8760]
+
 #wind_speeds: [1.5]
 
 
@@ -22,7 +26,7 @@ n_retro_x: 50
 n_retro_y: 40
 n_retro_z: 2 # Use 2 for compatibiltiy with plot_delta_z functionality
 
-span_retro_x: [-5, 250]
+span_retro_x: [-5, 350]
 span_retro_y: [-25, 150]
 span_retro_z: [0, 3]
 

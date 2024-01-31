@@ -1,10 +1,8 @@
 import pandas as pd
-from tqdm import tqdm
-import numpy as np
 import matplotlib.pyplot as plt
 import VRPM_functions
-from icecream import ic
 import seaborn as sns
+
 
 plt.style.use("eli_default")
 
@@ -23,35 +21,15 @@ plt.style.use("eli_default")
 #  Can / should we be using xarray?
 
 
-def calculate_pathlength(retro, origin):
-    """Calculate the pathlength from the origin to a retro
-
-    Parameters
-    ----------
-    retro : pd.DataFrame
-        Retro dataframe with columns x, y, z
-
-    origin : list
-        [x, y, z] of the origin
-
-    Returns
-    -------
-    pathlength : float
-        Pathlength from origin to retro
-    """
-    pathlength = np.sqrt(
-        (retro.x - origin[0]) ** 2
-        + (retro.y - origin[1]) ** 2
-        + (retro.z - origin[2]) ** 2
-    )
-
-    return pathlength
-
-
 config_name = "drainage_flow.yaml"
 config = VRPM_functions.read_measurement_geometry(config_name)
 sources, retros, point_sensors = VRPM_functions.create_measurement_geometry(
     config, simulation_type="real"
+)
+sources = VRPM_functions.assign_source_strength(
+    sources,
+    total_source_strength=config["Q_source_total"],
+    source_area=config["source_area"],
 )
 
 retros_for_simulation = (
@@ -60,7 +38,7 @@ retros_for_simulation = (
 
 
 retros["retro_names"] = config["retro_names"]
-retros["pathlength"] = calculate_pathlength(retros, config["origin"])
+retros["pathlength"] = VRPM_functions.calculate_pathlength(retros, config["origin"])
 point_sensor_names = config["point_sensor_names"]
 origin = config["origin"]
 
