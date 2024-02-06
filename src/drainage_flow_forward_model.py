@@ -1,5 +1,9 @@
+import os
+
 import pandas as pd
 import matplotlib.pyplot as plt
+from tqdm import tqdm
+
 import VRPM_functions
 import argparse
 import seaborn as sns
@@ -32,19 +36,23 @@ except:
 
 
 def parse_args():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="Run a forward model simulation of drainage flow "
+        "and output synthetic retro measurements and "
+        "point sensor measurements. Run from root of the project."
+    )
     parser.add_argument(
         "--config_name",
         "-c",
         type=str,
-        default="drainage_flow.yaml",
+        required=True,
         help="The name of the configuration file to use",
     )
     parser.add_argument(
         "--input_met_data_path",
         "-i",
         type=str,
-        default="input_met_data.csv",
+        default="data/input_met_data.csv",
         help="The path to the input meteorological data",
     )
     parser.add_argument(
@@ -60,10 +68,19 @@ def parse_args():
         help="Whether to plot the results",
     )
     parser.add_argument(
-        "--save_path",
+        "--save_name",
         type=str,
         default=None,
-        help="The path to save the simulation results",
+        help="The filename to save the simulation results. Don't include path "
+        "or extension as this will be used for both plot and csv files "
+        "in separate locations",
+    )
+    parser.add_argument(
+        "--resample_frequency",
+        type=str,
+        default=None,
+        help="The frequency to resample the input met data to. Should be a higher resolution than the input data.",
+        required=False,
     )
     return parser.parse_args()
 
@@ -73,7 +90,8 @@ config_name = args.config_name
 input_met_data_path = args.input_met_data_path
 plot_domain = args.plot_domain
 plot_results = args.plot_results
-save_path = args.save_path
+save_name = args.save_name
+resample_frequency = args.resample_frequency
 
 
 config = VRPM_functions.read_measurement_geometry(config_name)
@@ -100,6 +118,19 @@ origin = config["origin"]
 input_met_data = pd.read_csv(
     input_met_data_path, index_col=0, parse_dates=True
 ).dropna()
+
+if resample_frequency is not None:
+    # Ensure that the resample frequency is higher than the input data
+    try:
+        assert (
+            pd.to_timedelta(resample_frequency)
+            < input_met_data.index[1] - input_met_data.index[0]
+        )
+    except AssertionError:
+        print("Resample frequency must be higher than the input data frequency")
+        raise AssertionError
+
+    input_met_data = input_met_data.resample(resample_frequency).interpolate()
 
 
 if plot_domain:
@@ -175,5 +206,11 @@ if plot_results:
         simulation_results, retros_to_plot, point_sensor_names
     )
 
-if save_path is not None:
-    simulation_results.to_csv(save_path, index=False)
+if save_name is not None:
+    simulation_results.to_csv(
+        os.path.join("output_data", "forward_model", save_name + ".csv")
+    )
+    plt.savefig(os.path.join("plots", "forward_model", save_name + ".png"))
+    plt.close()
+else:
+    plt.close()
