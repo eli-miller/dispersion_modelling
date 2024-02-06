@@ -1,0 +1,25 @@
+Q_source_total: 8760 #1168 # from Clayton paper, max possible. # 620 is 10x katey anecdodal # 62 is from katey in meeting  # g/m^2/year 10x to get ground level conc. to match
+source_area: 600  # m^2
+origin: [0, 0, 230]
+
+
+n_source_x: 1 #10
+n_source_y: 1 #10
+span_source_x: [0,0] #[-5, 5]
+span_source_y: [0,0] #[-5, 5]
+
+source_loc_y: 2500
+source_loc_x: 0
+source_loc_z: 0 # Keep zero
+
+n_retro_x: 5
+n_retro_y: 4
+n_retro_z: 2 # Use 2 for compatibiltiy with plot_delta_z functionality
+
+span_retro_x: [-5, 205]
+span_retro_y: [-10, 100]
+span_retro_z: [1, 2.5]
+
+retro_loc_x : 0
+retro_loc_y : 2500
+
