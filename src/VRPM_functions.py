@@ -83,7 +83,18 @@ def l_to_PG(l, method="Munoz"):
 
 def dispersion_coeffs(stability):
     """
+    Dispersion Coefficients for gaussian plume model, Table 6.2 in De Visscher.
+
+    Parameters
+    ----------
+    stability : str
+        Stability class for the atmosphere. Can be "A", "B", "C", "D", "E", or "F".
+
     Returns
+    -------
+    a, b, c, d, e, f : float
+        Coefficients for the dispersion model.
+
     """
     # Class A
     if stability == "A":  # Very unstable
@@ -103,7 +114,7 @@ def dispersion_coeffs(stability):
     return a, b, c, d, e, f
 
 
-# def general_concentration(x,y,z, Q=1, u=1, stability="E"):
+# def general_concentration(x,y,z, Q=1, wind_speed=1, stability="E"):
 def general_concentration(beam_loc, source_loc, Q, u_mag, u_dir, stability="E"):
     """Q [kg/s] emission rate and returns a concentration [ppm] at that point"""
     """ With reflection. Page """
@@ -141,7 +152,7 @@ def general_concentration(beam_loc, source_loc, Q, u_mag, u_dir, stability="E"):
     sigma_y = a * x_prime / (1 + b * x_prime) ** c
     sigma_z = d * x_prime / (1 + e * x_prime) ** f
 
-    # C = Q/(2*pi*sigma_y*sigma_z*u)  * exp(-y_prime**2/(2*sigma_y**2)) * (exp(-(z_glob)**2/(2*sigma_z**2))+exp(-(z_glob)**2/(2*sigma_z**2)))
+    # C = Q/(2*pi*sigma_y*sigma_z*wind_speed)  * exp(-y_prime**2/(2*sigma_y**2)) * (exp(-(z_glob)**2/(2*sigma_z**2))+exp(-(z_glob)**2/(2*sigma_z**2)))
     h = 0
     C = (
         Q
@@ -651,15 +662,11 @@ def create_measurement_geometry_synthetic(config):
         source_loc_y + np.linspace(span_source_y[0], span_source_y[1], n_source_y),
     )
 
-    Q_source = (Q_source_total * source_area) / len(sources_x.ravel())
-    Q_source /= 1000 * 365 * 24 * 60 * 60  # Convert to kg/s
-
     sources = pd.DataFrame(
         {
             "x": sources_x.ravel(),
             "y": sources_y.ravel(),
             "z": source_loc_z,
-            "strength": Q_source,
         }
     )
 
@@ -953,10 +960,37 @@ def plot_delta_z(summary, z_vals, vmax_plot=0.1):
     plt.tight_layout()
 
 
+def assign_source_strength(sources, total_source_strength, source_area):
+    """Assigns source strength to each source based on the total source strength.
+    Parameters
+    ----------
+    sources : pd.DataFrame
+        Dataframe of source locations. Must have columns x, y, z.
+    total_source_strength : float
+        Total source strength in g/m^2/year.
+    source_area : float
+        Area of the source grid in m^2.
+    Returns
+    -------
+    sources : pd.DataFrame
+        Dataframe of source locations. Must have columns x, y, z, strength.
+    """
+
+    Q_source = (total_source_strength * source_area) / len(sources)
+    Q_source /= (
+        1000 * 365 * 24 * 60 * 60
+    )  # Convert to kg/s (plume model) from g/m^2/year (Katey et al)
+
+    sources["strength"] = Q_source
+
+    return sources
+
+
 def simulate_stacked_retros(
     u,
     stability,
     u_dir=0,
+    Q=0,
     plot=False,
     save_fig_dir=None,
     save_plot=False,
@@ -988,12 +1022,12 @@ def simulate_stacked_retros(
 
     config = read_measurement_geometry(config_file)
     sources, retros = create_measurement_geometry(config)
+    sources = assign_source_strength(sources, Q, config["source_area"])
     origin = config["origin"]
 
-    print("Running stability %s_%f mps.png" % (stability, u))
     pics, sim_info = get_synthetic_measurement(
         retros,
-        sources,
+        sources,  # This contains the strength information
         origin,
         u_mag=u,
         u_dir=u_dir,
@@ -1002,10 +1036,9 @@ def simulate_stacked_retros(
         # this is along beam plotting. Super slow. Keep off.
     )
 
-    lg = np.array(
-        np.sqrt(retros.x**2 + retros.y**2)
-    )  # approx distance. TODO: Take z into account here
-    avg_conc = pics / lg
+    pathlengths = calculate_pathlength(retros, origin)
+
+    avg_conc = pics / pathlengths
 
     beam_info = create_beam_info(sim_info)
 
@@ -1018,7 +1051,7 @@ def simulate_stacked_retros(
     summary["y_rel"] = summary.y - summary.y.mean()
 
     summary["stability"] = stability
-    summary["u"] = u
+    summary["wind_speed"] = u
 
     if plot:
         plot_delta_z(summary, z_vals=config["span_retro_z"], vmax_plot=0.02)
@@ -1061,6 +1094,50 @@ def get_contour_coordinates(X, Y, C, contour_level):
     return np.array(contour_coordinates[0])
 
 
+def get_max_contour_locations(contours):
+    """Get the location of the maximum concentration in the contour plot and their coordinates.
+
+    Parameters
+    ----------
+    contours : np.ndarray
+        The coordinates of the contour plot.
+
+    Returns
+    -------
+    x_max_coords : tuple
+        The x-coordinate of the maximum concentration and the corresponding y-coordinate.
+    y_max_coords : tuple
+        The y-coordinate of the maximum concentration and the corresponding x-coordinate.
+    """
+
+    # TODO: this function may be a good place to make sure the contour is closed
+    if type(contours) is not np.ndarray:
+        contours = np.array(contours)
+
+    x_max, y_max = contours.max(axis=0)
+
+    y_at_max_x = contours[contours[:, 0] == x_max, 1]
+    x_at_max_y = contours[contours[:, 1] == y_max, 0]
+
+    # Try to make y_at_max_x and x_at_max_y into scalars. If they are not a single number, then the contour is likely not closed.
+    try:
+        y_at_max_x = float(y_at_max_x)
+    except:
+        raise ValueError(
+            f"y_at_max_x should be a single number. got {y_at_max_x}. \n Check that the contour is closed."
+        )
+    try:
+        x_at_max_y = float(x_at_max_y)
+    except:
+        raise ValueError(
+            f"x_at_max_y should be a single number. got {x_at_max_y}. \n Check that the contour is closed."
+        )
+    x_max_coords = (x_max, y_at_max_x)
+    y_max_coords = (x_at_max_y, y_max)
+
+    return x_max_coords, y_max_coords
+
+
 def convert_wind_direction(direction):
     """
     This function takes wind readings from an anemometor
@@ -1091,3 +1168,121 @@ def convert_wind_direction(direction):
     new_direction_rad = np.radians(new_direction_deg)
 
     return new_direction_rad
+
+
+def calculate_pathlength(retro, origin):
+    """Calculate the pathlength from the origin to a retro
+
+    Parameters
+    ----------
+    retro : pd.DataFrame
+        Retro dataframe with columns x, y, z
+
+    origin : list
+        [x, y, z] of the origin
+
+    Returns
+    -------
+    pathlength : float
+        Pathlength from origin to retro
+    """
+    pathlength = np.sqrt(
+        (retro.x - origin[0]) ** 2
+        + (retro.y - origin[1]) ** 2
+        + (retro.z - origin[2]) ** 2
+    )
+
+    return pathlength
+
+
+def plot_contours(df, group_by):
+    """Plot the contours from detection limit simulations
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Dataframe containing the contours of the simulations.
+    group_by : str
+        Column to group the data by for plotting
+    """
+
+    for name, group in df.groupby(group_by):
+        fig, ax = plt.subplots(figsize=(8, 6))
+        for _, row in group.iterrows():
+            contours = np.array(
+                row["contours"]
+            )  # Re-make array. This is a workaround that the dataframe doesn't like having 2d arrays as an entry
+
+            ax.plot(
+                contours[:, 0],
+                contours[:, 1],
+                label=f"{row['stability']}, {row['wind_speed']} [m/s], {row['wind_direction']} deg, {row['source_strength']} Q",
+                linestyle="solid",
+            )
+        ax.legend()
+
+
+def plot_simulation_results(simulation_results, retro_names, point_sensor_names):
+    fig, axs = plt.subplots(
+        2,
+        2,
+        figsize=(9, 9),
+        sharex="col",
+        sharey="row",
+        gridspec_kw={"width_ratios": [2, 1], "height_ratios": [2, 1]},
+    )
+
+    # Plot the retro measurements vs time
+    for retro_name in retro_names:
+        sns.lineplot(
+            data=simulation_results,
+            x="datetime",
+            y=retro_name,
+            label=retro_name,
+            ax=axs[0, 0],
+            # alpha=0.5,
+        )
+
+        sns.scatterplot(
+            data=simulation_results,
+            x="wind_dir",
+            y=retro_name,
+            # label=retro_name,
+            ax=axs[0, 1],
+            size="wind_speed",
+        )
+
+    # Plot the point sensor measurements vs time
+    for point_sensor_name in point_sensor_names:
+        sns.lineplot(
+            data=simulation_results,
+            x="datetime",
+            y=point_sensor_name,
+            label=point_sensor_name,
+            ax=axs[1, 0],
+            # alpha=0.5,
+        )
+
+        sns.scatterplot(
+            data=simulation_results,
+            x="wind_dir",
+            y=point_sensor_name,
+            # label=point_sensor_name,
+            ax=axs[1, 1],
+            size="wind_speed",
+        )
+
+    axs[0, 0].set_title("Retro Measurements vs Time")
+    axs[0, 1].set_title("Retro Measurements vs Wind Direction")
+    axs[1, 0].set_title("Point Sensor Measurements vs Time")
+    axs[1, 1].set_title("Point Sensor Measurements vs Wind Direction")
+
+    axs[0, 0].set_ylabel("Path-averaged enhancement (ppm)")
+    axs[1, 0].set_ylabel("Point sensor enhancement (ppm)")
+
+    plt.tight_layout()
+    plt.show()
+
+    # Turn x axis labels 45 degrees for axs[1,0]
+    for tick in axs[1, 0].get_xticklabels():
+        tick.set_rotation(45)
