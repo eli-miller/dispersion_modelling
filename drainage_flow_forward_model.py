@@ -1,10 +1,13 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import VRPM_functions
+import argparse
 import seaborn as sns
 
-
-plt.style.use("eli_default")
+try:
+    plt.style.use("eli_default")
+except:
+    pass
 
 # TODO: Restructure to make the "retros" df more full-featured.
 #  Currently, there is a lot of fragile unpacking in the VRPM_functions that
@@ -20,9 +23,61 @@ plt.style.use("eli_default")
 # TODO: rethink setup.  Can we reduce down to much less data strucutres and variables?
 #  Can / should we be using xarray?
 
+#
+# config_name = "drainage_flow.yaml"
+# input_met_data_path = "input_met_data.csv"
+# plot_domain = False
+# plot_results = True
+# save_path = "simulation_results.csv"
 
-config_name = "drainage_flow.yaml"
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--config_name",
+        "-c",
+        type=str,
+        default="drainage_flow.yaml",
+        help="The name of the configuration file to use",
+    )
+    parser.add_argument(
+        "--input_met_data_path",
+        "-i",
+        type=str,
+        default="input_met_data.csv",
+        help="The path to the input meteorological data",
+    )
+    parser.add_argument(
+        "--plot_domain",
+        default=False,
+        action="store_true",
+        help="Whether to plot the domain",
+    )
+    parser.add_argument(
+        "--plot_results",
+        action="store_true",
+        default=True,
+        help="Whether to plot the results",
+    )
+    parser.add_argument(
+        "--save_path",
+        type=str,
+        default=None,
+        help="The path to save the simulation results",
+    )
+    return parser.parse_args()
+
+
+args = parse_args()
+config_name = args.config_name
+input_met_data_path = args.input_met_data_path
+plot_domain = args.plot_domain
+plot_results = args.plot_results
+save_path = args.save_path
+
+
 config = VRPM_functions.read_measurement_geometry(config_name)
+
 sources, retros, point_sensors = VRPM_functions.create_measurement_geometry(
     config, simulation_type="real"
 )
@@ -43,29 +98,19 @@ point_sensor_names = config["point_sensor_names"]
 origin = config["origin"]
 
 input_met_data = pd.read_csv(
-    "input_met_data.csv", index_col=0, parse_dates=True
+    input_met_data_path, index_col=0, parse_dates=True
 ).dropna()
 
-# # Interpolate input_met_data onto a 5 minute interval. For stability, use the
-# # previous stability value
-# input_met_data = input_met_data.resample("5T").interpolate(method="linear")
-# input_met_data["stability"] = input_met_data["stability"].fillna(
-#     method="ffill"
-# )  # fill in the first value with the first value
 
-fig, axs = VRPM_functions.plot_simulation_domain(
-    sources, retros, config["origin"], draw_beams=True
-)
+if plot_domain:
+    fig, axs = VRPM_functions.plot_simulation_domain(
+        sources, retros, config["origin"], draw_beams=True
+    )
+    fig, axs = VRPM_functions.add_point_sensors_to_domain(point_sensors, axs)
 
-fig, axs = VRPM_functions.add_point_sensors_to_domain(point_sensors, axs)
-# For each entry in the input_met_data, run the simulation and save the output
-# to a csv file that contains inputs and results for each retro and point sensor measurement
 
-# %%
-# Create a dataframe to store the results
 simulation_results = pd.DataFrame()
 
-# Loop over the input_met_data
 for index, row in input_met_data.iterrows():
     converted_wind_directon = VRPM_functions.convert_wind_direction(row["wind_dir"])
     # Note PIC is returned as ppm*m.  Need to normalize by pathlength
@@ -79,8 +124,6 @@ for index, row in input_met_data.iterrows():
         plot=False,
     )
 
-    # Get the measurements at each point sensor using general_concentration
-
     point_sensor_measurement = VRPM_functions.general_concentration(
         beam_loc=point_sensors,
         source_loc=list(
@@ -91,6 +134,7 @@ for index, row in input_met_data.iterrows():
         u_dir=converted_wind_directon,
         stability=row["stability"],
     )
+    # TODO: is this just the row?
     single_run_df = pd.DataFrame(
         {
             "datetime": [index],
@@ -104,18 +148,17 @@ for index, row in input_met_data.iterrows():
 
     # add the pics to the dataframe using the retro names from the config file
     for retro_name, pic in zip(retros["retro_names"], pics):
-        # # Determine pathlength for each retro. This would be the elegant way to implement, but have to fix the
-        # # retro dataframe to include the pathlength and not break the rest of the code (sloppy unpacking)
+        # Determine pathlength for each retro. This would be the elegant way to implement, but have to fix the
+        # retro dataframe to include the pathlength and not break the rest of the code (sloppy unpacking)
         pathlength = retros[retros["retro_names"] == retro_name]["pathlength"]
         pathlength = pathlength.iloc[0]
         single_run_df[retro_name] = pic / pathlength
 
-    # add the point sensor measurements to the dataframe using the point sensor names from the config file
     for point_sensor_name, point_sensor_measurement in zip(
         point_sensor_names, point_sensor_measurement
     ):
         single_run_df[point_sensor_name] = point_sensor_measurement
-    # Add the measurements to the dataframe. unpack pics with the names from the config file
+
     simulation_results = pd.concat(
         [
             simulation_results,
@@ -125,83 +168,12 @@ for index, row in input_met_data.iterrows():
     )
 
 
-# %%
-def plot_simulation_results(simulation_results, retro_names, point_sensor_names):
-    fig, axs = plt.subplots(
-        2,
-        2,
-        figsize=(9, 9),
-        sharex="col",
-        sharey="row",
-        gridspec_kw={"width_ratios": [2, 1], "height_ratios": [2, 1]},
-    )
-
-    # Plot the retro measurements vs time
-    for retro_name in retro_names:
-        sns.lineplot(
-            data=simulation_results,
-            x="datetime",
-            y=retro_name,
-            label=retro_name,
-            ax=axs[0, 0],
-            # alpha=0.5,
-        )
-
-        sns.scatterplot(
-            data=simulation_results,
-            x="wind_dir",
-            y=retro_name,
-            # label=retro_name,
-            ax=axs[0, 1],
-            size="wind_speed",
-        )
-
-    # Plot the point sensor measurements vs time
-    for point_sensor_name in point_sensor_names:
-        sns.lineplot(
-            data=simulation_results,
-            x="datetime",
-            y=point_sensor_name,
-            label=point_sensor_name,
-            ax=axs[1, 0],
-            # alpha=0.5,
-        )
-
-        sns.scatterplot(
-            data=simulation_results,
-            x="wind_dir",
-            y=point_sensor_name,
-            # label=point_sensor_name,
-            ax=axs[1, 1],
-            size="wind_speed",
-        )
-
-    axs[0, 0].set_title("Retro Measurements vs Time")
-    axs[0, 1].set_title("Retro Measurements vs Wind Direction")
-    axs[1, 0].set_title("Point Sensor Measurements vs Time")
-    axs[1, 1].set_title("Point Sensor Measurements vs Wind Direction")
-
-    axs[0, 0].set_ylabel("Path-averaged enhancement (ppm)")
-    axs[1, 0].set_ylabel("Point sensor enhancement (ppm)")
-
-    plt.tight_layout()
-    plt.show()
-
-    # Turn x axis labels 45 degrees for axs[1,0]
-    for tick in axs[1, 0].get_xticklabels():
-        tick.set_rotation(45)
-
-
 retros_to_plot = retros["retro_names"]
 
-# remove any retros or point sensors that begin with "NorthEastBracket"
-retros_to_plot = [
-    retro for retro in retros_to_plot if not retro.startswith("NorthEastBracket")
-]
-point_sensor_names = [
-    point_sensor_name
-    for point_sensor_name in point_sensor_names
-    if not point_sensor_name.startswith("NorthEastBracket")
-]
+if plot_results:
+    VRPM_functions.plot_simulation_results(
+        simulation_results, retros_to_plot, point_sensor_names
+    )
 
-plot_simulation_results(simulation_results, retros_to_plot, point_sensor_names)
+if save_path is not None:
+    simulation_results.to_csv(save_path, index=False)

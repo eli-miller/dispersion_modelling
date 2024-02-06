@@ -14,6 +14,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
 from tqdm import tqdm
 
 import VRPM_functions
@@ -57,8 +58,14 @@ wind_directions = [VRPM_functions.convert_wind_direction(wd) for wd in wind_dire
 contour_df = pd.DataFrame()
 
 combinations = it.product(wind_directions, wind_speeds, stabilitys, source_strengths)
+total_iterations = (
+    len(wind_directions) * len(wind_speeds) * len(stabilitys) * len(source_strengths)
+)
 
-for wind_direction, wind_speed, stability, source_strength in tqdm(combinations):
+
+for wind_direction, wind_speed, stability, source_strength in tqdm(
+    combinations, total=total_iterations
+):
     # First thing is to get the measurement field and overall metrics at each retro
     summary = simulate_stacked_retros(
         wind_speed,
@@ -94,22 +101,36 @@ for wind_direction, wind_speed, stability, source_strength in tqdm(combinations)
 
     # This is how it was before: x_max_coords, y_max_coords = get_max_contour_locations(contours)
     # Let's use a .apply or something
+contour_df.to_csv("detection_limit.csv", index=False)
 # %%
-plot_contours(contour_df, group_by="stability")
-
+plot_contours(contour_df, group_by=["stability", "wind_direction"])
 
 # %%
 # Remove D and F stability classes
-contour_df = contour_df[~contour_df["stability"].isin(["E", "F"])]
-contour_df["max_coords"] = contour_df["contours"].apply(get_max_contour_locations)
+# contour_df = contour_df[~contour_df["stability"].isin(["E", "F"])]
+
+# contour_df = pd.read_csv("detection_limit_store.csv")
+
+
+def safe_get_max_contour_locations(contour):
+    try:
+        return get_max_contour_locations(contour)
+    except:
+        return ((0, 0), (0, 0))
+
+
+contour_df["max_coords"] = contour_df["contours"].apply(safe_get_max_contour_locations)
+
 contour_df["x_max"] = contour_df["max_coords"].apply(lambda x: x[0][0])
 contour_df["y_max"] = contour_df["max_coords"].apply(lambda x: x[1][1])
 contour_df["y_at_x_max"] = contour_df["max_coords"].apply(lambda x: x[0][1])
 contour_df["x_at_y_max"] = contour_df["max_coords"].apply(lambda x: x[1][0])
 
-
+contour_df.y_max -= 2500  # shift relative to source
 # %%
-for field in ["x_max", "y_max", "y_at_x_max", "x_at_y_max"]:
+
+
+for field in ["x_max", "y_max"]:
     plt.figure()
     sns.scatterplot(
         data=contour_df,
@@ -119,3 +140,6 @@ for field in ["x_max", "y_max", "y_at_x_max", "x_at_y_max"]:
         style="wind_direction",
         s=100,
     )
+
+# Plot the effect of source strength
+plt.figure()

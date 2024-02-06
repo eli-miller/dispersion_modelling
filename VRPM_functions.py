@@ -83,7 +83,18 @@ def l_to_PG(l, method="Munoz"):
 
 def dispersion_coeffs(stability):
     """
+    Dispersion Coefficients for gaussian plume model, Table 6.2 in De Visscher.
+
+    Parameters
+    ----------
+    stability : str
+        Stability class for the atmosphere. Can be "A", "B", "C", "D", "E", or "F".
+
     Returns
+    -------
+    a, b, c, d, e, f : float
+        Coefficients for the dispersion model.
+
     """
     # Class A
     if stability == "A":  # Very unstable
@@ -1209,3 +1220,69 @@ def plot_contours(df, group_by):
                 linestyle="solid",
             )
         ax.legend()
+
+
+def plot_simulation_results(simulation_results, retro_names, point_sensor_names):
+    fig, axs = plt.subplots(
+        2,
+        2,
+        figsize=(9, 9),
+        sharex="col",
+        sharey="row",
+        gridspec_kw={"width_ratios": [2, 1], "height_ratios": [2, 1]},
+    )
+
+    # Plot the retro measurements vs time
+    for retro_name in retro_names:
+        sns.lineplot(
+            data=simulation_results,
+            x="datetime",
+            y=retro_name,
+            label=retro_name,
+            ax=axs[0, 0],
+            # alpha=0.5,
+        )
+
+        sns.scatterplot(
+            data=simulation_results,
+            x="wind_dir",
+            y=retro_name,
+            # label=retro_name,
+            ax=axs[0, 1],
+            size="wind_speed",
+        )
+
+    # Plot the point sensor measurements vs time
+    for point_sensor_name in point_sensor_names:
+        sns.lineplot(
+            data=simulation_results,
+            x="datetime",
+            y=point_sensor_name,
+            label=point_sensor_name,
+            ax=axs[1, 0],
+            # alpha=0.5,
+        )
+
+        sns.scatterplot(
+            data=simulation_results,
+            x="wind_dir",
+            y=point_sensor_name,
+            # label=point_sensor_name,
+            ax=axs[1, 1],
+            size="wind_speed",
+        )
+
+    axs[0, 0].set_title("Retro Measurements vs Time")
+    axs[0, 1].set_title("Retro Measurements vs Wind Direction")
+    axs[1, 0].set_title("Point Sensor Measurements vs Time")
+    axs[1, 1].set_title("Point Sensor Measurements vs Wind Direction")
+
+    axs[0, 0].set_ylabel("Path-averaged enhancement (ppm)")
+    axs[1, 0].set_ylabel("Point sensor enhancement (ppm)")
+
+    plt.tight_layout()
+    plt.show()
+
+    # Turn x axis labels 45 degrees for axs[1,0]
+    for tick in axs[1, 0].get_xticklabels():
+        tick.set_rotation(45)

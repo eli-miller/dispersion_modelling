@@ -7,7 +7,7 @@ origin: [0, 0, 230]
 
 stability_classes: ["A", "B", "C", "D", "E", "F"]
 wind_speeds: [1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5]
-wind_directions: [-90] # in meterologial coords. converted in script
+wind_directions: [-90,-100,-110,-120, -80, -70, -60 ] # in meterologial coords. converted in script
 source_strengths: [8760]
 
 #wind_speeds: [1.5]
@@ -18,7 +18,7 @@ n_source_y: 1 #10
 span_source_x: [0,0] #[-5, 5]
 span_source_y: [0,0] #[-5, 5]
 
-source_loc_y: 2500
+source_loc_y: 2500Ï
 source_loc_x: 0
 source_loc_z: 0 # Keep zero
 
