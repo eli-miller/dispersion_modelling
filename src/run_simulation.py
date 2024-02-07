@@ -21,7 +21,7 @@ for input_file in tqdm(input_files):
         f"python src/drainage_flow_forward_model.py "
         f"--config_name configs/drainage_flow.yaml "
         f"--input_met_data_path {os.path.join(input_dir, input_file)} "
-        f"--save_name stability_case_{stability_case}"
+        f"--save_name stability_case_{stability_case} "
     )
 
     # Use subprocess to run the command

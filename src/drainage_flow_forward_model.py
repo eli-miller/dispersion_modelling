@@ -64,7 +64,7 @@ def parse_args():
     parser.add_argument(
         "--plot_results",
         action="store_true",
-        default=True,
+        default=False,
         help="Whether to plot the results",
     )
     parser.add_argument(

@@ -5,7 +5,7 @@ from datetime import datetime
 
 # Create arrays of wind speeds and wind directions using numpy
 wind_speeds = np.arange(0.5, 10.5, 0.5)
-wind_directions = np.arange(0, 385, 25)
+wind_directions = np.arange(0, 385, 1)
 wind_sources = ["synthetic"]
 stability_classes = ["A", "B", "C", "D", "E", "F"]
 
