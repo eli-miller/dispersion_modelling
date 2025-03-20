@@ -16,8 +16,12 @@ import seaborn as sns
 import tqdm
 import yaml
 from matplotlib import colors
-from numba import njit
 from scipy.optimize import minimize, Bounds
+import xml.etree.ElementTree as ET
+
+# from shapely import MultiPoint
+# from shapely.geometry import Polygon, Point
+# import pyproj
 
 
 ############################################################################################################
@@ -39,7 +43,7 @@ def line_points(start, end, num_pts=5000):
     return np.array([xs, ys, zs]).T
 
 
-def l_to_PG(l, method="Munoz"):
+def l_to_PG(l, method="Foken"):
     """Turns obukhov length into Pasquill-Gifford stability class based on table 1 from Munoz Esparaza
     Note that our function for dispersion coefficcients below does not have class G, so we will use F instead.
     Also this paper does not have a class E (slightly stable)... TODO: figure this out.
@@ -64,18 +68,20 @@ def l_to_PG(l, method="Munoz"):
             return "A"
 
     elif method == "Foken":
-        if -30 < l < 0:
+        if -30 <= l < 0:
             return "A"
-        elif -100 < l < -30:
+        elif -100 <= l < -30:
             return "B"
-        elif -3000 < l < -100:
+        elif -3000 <= l < -100:
             return "C"
-        elif 0 < l < 60:
+        elif 0 < l <= 60:
             return "F"
-        elif 60 < l < 250:
+        elif 60 < l <= 250:
             return "E"
         elif 250 < l < 5000:
             return "D"
+        else:
+            return "H"  # This is a test. Not real but we aren't catching extremely large values of L (Which I think should be neutral?)
 
     elif method == "Woodward":
         raise NotImplementedError
@@ -612,7 +618,7 @@ def create_measurement_geometry_real(config):
     point_sensors = pd.DataFrame(point_sensor_locs, columns=["x", "y", "z"])
 
     Q_source = (Q_source_total * source_area) / len(sources)
-    Q_source /= 1000 * 365 * 24 * 60 * 60  # Convert to kg/s
+    Q_source /= 1000 * 365 * 24 * 60 * 60  # Convert to kg/s from g/m^2/year
 
     sources["strength"] = Q_source
 
@@ -1138,7 +1144,7 @@ def get_max_contour_locations(contours):
     return x_max_coords, y_max_coords
 
 
-def convert_wind_direction(direction):
+def convert_wind_direction_from_anemometer(direction):
     """
     This function takes wind readings from an anemometor
     where zero is blowing from the north, increasing clockwise in degrees
@@ -1168,6 +1174,38 @@ def convert_wind_direction(direction):
     new_direction_rad = np.radians(new_direction_deg)
 
     return new_direction_rad
+
+
+def convert_wind_direction_to_anemometer(direction):
+    """
+    This function takes wind readings from a simulation or cartesian slop
+    where zero isblowing from the east, increasing counter clockwise in radians
+    and returns a wind direction for an anemometer in degrees
+    where zero is blowing from the north, increasing clockwise
+
+    Parameters
+    ----------
+    direction: float
+        Wind direction in radians from east (CCW).
+
+
+    Returns
+    -------
+    direction : float
+        Wind direction in degrees from north (CW).
+
+
+    """
+
+    new_direction_deg = np.degrees(direction)
+    new_direction_deg = -new_direction_deg + 90
+    # make in range 0-360
+    if new_direction_deg > 360:
+        new_direction_deg -= 360
+    elif new_direction_deg < 0:
+        new_direction_deg += 360
+
+    return new_direction_deg
 
 
 def calculate_pathlength(retro, origin):
@@ -1286,3 +1324,218 @@ def plot_simulation_results(simulation_results, retro_names, point_sensor_names)
     # Turn x axis labels 45 degrees for axs[1,0]
     for tick in axs[1, 0].get_xticklabels():
         tick.set_rotation(45)
+
+
+def process_kml_to_relative_coords(kml_path, ref_lat, ref_lon):
+    """
+    Extracts coordinates from a KML file, converts them to UTM coordinates,
+    and calculates their relative positions to a given reference point.
+
+    Parameters
+    ----------
+    kml_path : str
+        The file path to the KML file.
+    ref_lat : float
+        The reference latitude for relative position calculation.
+    ref_lon : float
+        The reference longitude for relative position calculation.
+
+    Returns
+    -------
+    df_coordinates: pd.DataFrame
+        DataFrame containing latitude, longitude, easting, northing,
+        relative easting, and relative northing.
+    ref_easting : float
+        Reference easting coordinate.
+    ref_northing : float
+        Reference northing coordinate.
+
+    """
+
+    # Load and parse the KML file
+    tree = ET.parse(kml_path)
+    root = tree.getroot()
+
+    # Define namespaces to find coordinates in KML
+    namespaces = {"kml": "http://www.opengis.net/kml/2.2"}
+
+    # Extract coordinates from the KML file
+    coordinates = []
+    for placemark in root.findall(".//kml:Placemark", namespaces):
+        for coord in placemark.findall(".//kml:coordinates", namespaces):
+            # Split coordinates (lon, lat, alt) and take the first two (lon, lat)
+            coords = coord.text.strip().split()
+            for c in coords:
+                lon, lat, _ = map(float, c.split(","))
+                coordinates.append((lat, lon))
+
+    # Create a DataFrame with the extracted coordinates
+    df_coordinates = pd.DataFrame(coordinates, columns=["latitude", "longitude"])
+
+    # Initialize UTM converter
+    proj_utm = pyproj.Proj(proj="utm", zone=6, datum="WGS84")
+
+    # Convert reference coordinates to UTM
+    ref_easting, ref_northing = proj_utm(ref_lon, ref_lat)
+
+    # Convert all coordinates to UTM
+    utm_coords = df_coordinates.apply(
+        lambda row: proj_utm(row["longitude"], row["latitude"]), axis=1
+    )
+    df_coordinates["easting"] = [x[0] for x in utm_coords]
+    df_coordinates["northing"] = [x[1] for x in utm_coords]
+
+    # Calculate relative coordinates in meters
+    df_coordinates["rel_easting"] = df_coordinates["easting"] - ref_easting
+    df_coordinates["rel_northing"] = df_coordinates["northing"] - ref_northing
+
+    return df_coordinates, ref_easting, ref_northing
+
+
+def process_gimbal_config_to_relative_coords(gimbal_config_path, ref_lat, ref_lon):
+    """
+    Extracts coordinates from a gimbal configuration file, converts them to UTM coordinates,
+    and calculates their relative positions to a given reference point.
+
+    Parameters
+    ----------
+    gimbal_config_path: str
+        The file path to the gimbal configuration file (csv)
+
+    ref_lat: float
+        The reference latitude for relative position calculation.
+
+    ref_lon: float
+
+
+    Returns
+    -------
+    df_coordinates: pd.DataFrame
+        DataFrame containing latitude, longitude, easting, northing,
+        relative easting, and relative northing.
+    ref_easting: float
+        Reference easting coordinate.
+    ref_northing: float
+        Reference northing coordinate.
+
+    """
+
+    # Load the gimbal configuration file
+    df_gimbal = create_gimbal_config_df(gimbal_config_path)
+
+    # Initialize UTM converter
+    proj_utm = pyproj.Proj(proj="utm", zone=6, datum="WGS84")
+
+    # Convert reference coordinates to UTM
+    ref_easting, ref_northing = proj_utm(ref_lon, ref_lat)
+
+    # Convert all coordinates to UTM
+    utm_coords = df_gimbal.apply(lambda row: proj_utm(row["lon"], row["lat"]), axis=1)
+    df_gimbal["easting"] = [x[0] for x in utm_coords]
+    df_gimbal["northing"] = [x[1] for x in utm_coords]
+
+    # Calculate relative coordinates in meters
+    df_gimbal["rel_easting"] = df_gimbal["easting"] - ref_easting
+    df_gimbal["rel_northing"] = df_gimbal["northing"] - ref_northing
+
+    return df_gimbal, ref_easting, ref_northing
+
+
+def create_gimbal_config_df(gimbal_config_path):
+    df_gimbal = pd.read_csv(gimbal_config_path, skiprows=1)
+    df_gimbal.dropna(subset=["lat", "lon"], inplace=True)
+    # drop if the name is "Telescope"
+    df_gimbal = df_gimbal[df_gimbal["name"] != "Telescope"]
+    return df_gimbal
+
+
+def create_lake_boundary(coords):
+    """
+    Creates a polygon representing the lake boundary.
+
+    Parameters
+    ----------
+    coords : pd.DataFrame
+        DataFrame containing the easting and northing of the lake boundary points.
+
+    Returns
+    -------
+    Polygon
+        Polygon object representing the lake boundary.
+    """
+    points = list(zip(coords["easting"], coords["northing"]))
+    lake_boundary = Polygon(points)
+
+    # Calculate the area of the lake using convex hull
+    lake_area = MultiPoint(points).convex_hull.area
+
+    return lake_boundary, lake_area
+
+
+def generate_grid(lake_boundary, spacing):
+    """
+    Generates a grid of points within the bounding box of the lake boundary.
+
+    Parameters
+    ----------
+    lake_boundary : Polygon
+        Polygon object representing the lake boundary.
+    spacing : float
+        Spacing between grid points in meters.
+
+    Returns
+    -------
+    np.ndarray
+        Array of grid points.
+    """
+    min_x, min_y, max_x, max_y = lake_boundary.bounds
+    x_coords = np.arange(min_x, max_x, spacing)
+    y_coords = np.arange(min_y, max_y, spacing)
+    grid_points = np.array(np.meshgrid(x_coords, y_coords)).T.reshape(-1, 2)
+    return grid_points
+
+
+def filter_points_within_lake(grid_points, lake_boundary):
+    """
+    Filters grid points to keep only those within the lake boundary.
+
+    Parameters
+    ----------
+    grid_points : np.ndarray
+        Array of grid points.
+    lake_boundary : Polygon
+        Polygon object representing the lake boundary.
+
+    Returns
+    -------
+    np.ndarray
+        Array of points within the lake.
+    """
+    lake_points = [
+        point for point in grid_points if lake_boundary.contains(Point(point))
+    ]
+    return np.array(lake_points)
+
+
+def convert_to_relative(grid_points, ref_easting, ref_northing):
+    """
+    Converts UTM coordinates to relative coordinates.
+
+    Parameters
+    ----------
+    grid_points : np.ndarray
+        Array of grid points in UTM coordinates.
+    ref_easting : float
+        Reference easting coordinate.
+    ref_northing : float
+        Reference northing coordinate.
+
+    Returns
+    -------
+    np.ndarray
+        Array of points in relative coordinates.
+    """
+    rel_points = np.array(
+        [[point[0] - ref_easting, point[1] - ref_northing] for point in grid_points]
+    )
+    return rel_points
